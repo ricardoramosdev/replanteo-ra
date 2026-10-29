@@ -119,8 +119,9 @@ select{background:var(--ink);border:1px solid var(--line);border-radius:8px;padd
         <div class="grp">
           <h3>Abrir</h3>
           <label class="btn primary big" for="file">Abrir plano DXF o proyecto</label>
-          <input id="file" type="file" accept=".dxf,.json,.dwg" hidden>
-          <p class="note">DXF de AutoCAD, BricsCAD, LibreCAD o QGIS. Los DWG hay que guardarlos antes como DXF.</p>
+          <input id="file" type="file" hidden>
+          <p class="note">DXF de AutoCAD, BricsCAD, LibreCAD o QGIS. Los DWG hay que guardarlos antes como DXF. En iPhone, si el plano te llegó por mail o WhatsApp, primero usá “Guardar en Archivos”.</p>
+          <div class="row"><input id="url" type="url" inputmode="url" placeholder="o pegá un link a un DXF" style="flex:1;min-width:0;background:var(--ink);border:1px solid var(--line);border-radius:8px;padding:8px 9px;color:var(--fg)"><button class="btn" id="btnUrl">Abrir link</button></div>
         </div>
         <div class="grp">
           <h3>Ejemplos</h3>
@@ -387,9 +388,14 @@ const real=(x,y)=>[x+(S.P.origin?S.P.origin[0]:0),y+(S.P.origin?S.P.origin[1]:0)
 const coordTxt=(x,y)=>{const r=real(x,y);return S.P.kind==="dxf"?`X ${fmt(r[0],2)} · Y ${fmt(r[1],2)}`:`${fmt(x,2)}, ${fmt(y,2)} m`;};
 
 async function openFile(f){
-  const name=f.name.replace(/\.[^.]+$/,""),ext=f.name.split(".").pop().toLowerCase();
+  const fname=f.name||"plano";const name=fname.replace(/\.[^.]+$/,"")||"plano";let ext=fname.includes(".")?fname.split(".").pop().toLowerCase():"";
   if(ext==="dwg"){toast("Los DWG no se leen directo: abrilo en tu programa de CAD y usá Guardar como → DXF. También sirve ODA File Converter, que es gratis.",7000);return;}
-  const text=await f.text();
+  let text;try{text=await f.text();}catch(e){toast("No se pudo leer el archivo desde el celular: "+(e.message||e),6000);return;}
+  // el celular a veces cambia o quita la extensión: reconocemos el contenido
+  const head=text.slice(0,2000);
+  if(head.startsWith("AC10")){toast("Ese archivo es un DWG (aunque tenga otro nombre). Guardalo como DXF desde tu programa de CAD.",7000);return;}
+  if(ext!=="json"&&ext!=="dxf")ext=/^\s*\{/.test(head)?"json":/SECTION/.test(head)?"dxf":"";
+  if(!ext){toast("Ese archivo no parece un DXF ni un proyecto de esta app.",6000);return;}
   try{
     if(ext==="json"){const P=JSON.parse(text);if(!P.polylines||!P.points)throw new Error("No es un proyecto de esta app.");
       setProject(P,{keepRefs:true});S.A=P.savedRefs?.A||null;S.B=P.savedRefs?.B||null;updateSheet();draw();
@@ -402,6 +408,10 @@ async function openFile(f){
   }catch(e){toast("No se pudo leer el archivo: "+(e.message||e),6000);}
 }
 $("file").onchange=e=>{const f=e.target.files[0];if(f)openFile(f);e.target.value="";};
+$("btnUrl").onclick=async()=>{const u=$("url").value.trim();if(!u){toast("Pegá primero el link del archivo");return;}
+  try{const r=await fetch(u);if(!r.ok)throw new Error("el servidor respondió "+r.status);const t=await r.text();
+    const nm=decodeURIComponent(new URL(u,location.href).pathname.split("/").pop()||"plano.dxf");await openFile({name:nm,text:async()=>t});}
+  catch(e){toast("No se pudo descargar ese link ("+(e.message||e)+"). Algunos servicios, como Google Drive, no permiten abrir archivos desde otra página: descargalo y abrilo con el botón de arriba.",8000);}};
 $("unit").onchange=()=>{if(!S.raw)return;const P=RX_importDXF(S.raw,{name:S.P.name,unit:+$("unit").value});setProject(P);toast(`Unidades: ${P.unitName}. Tamaño ${fmt(P.size[0],1)} × ${fmt(P.size[1],1)} m`);};
 document.querySelectorAll("[data-ex]").forEach(b=>b.onclick=()=>{const k=b.dataset.ex;setProject(JSON.parse(JSON.stringify(BUILTIN[k])),{source:{kind:"builtin",id:k}});S.raw=null;$("drawer").hidden=true;});
 $("btnProject").onclick=()=>{$("drawer").hidden=false;};$("btnClose").onclick=()=>{$("drawer").hidden=true;};
