@@ -632,7 +632,10 @@ async function start8w(){
     cw=Math.round(cw);ch=Math.round(ch);const changed=cv8.width!==Math.round(cw*d)||cv8.height!==Math.round(ch*d);
     cv8.width=Math.round(cw*d);cv8.height=Math.round(ch*d);
     [["position","fixed"],["left",Math.round((W-cw)/2)+"px"],["top",Math.round((H-ch)/2)+"px"],["width",cw+"px"],["height",ch+"px"],["z-index","20"],["background","#000"]].forEach(([k,v])=>cv8.style.setProperty(k,v,"important"));
-    if(changed&&AR.on&&!AR._rs){AR._rs=true;dispatchEvent(new Event("resize"));AR._rs=false;}};
+    if(changed&&AR.on&&!AR._rs){AR._rs=true;dispatchEvent(new Event("resize"));AR._rs=false;}AR.renudge8&&AR.renudge8();};
+  // El motor arma el encuadre con el tamaño del video del primer cuadro; en iPhone ese tamaño cambia al estabilizarse la cámara.
+  // Girar el celular lo corregía: simulamos ese aviso de giro para que recalcule el encuadre.
+  AR.renudge8=()=>{clearTimeout(AR._nt);AR._nt=setTimeout(()=>{try{dispatchEvent(new Event("orientationchange"));}catch(e){}},120);};
   AR.fit8=fit8;fit8();if(!AR.fit8l){AR.fit8l=true;addEventListener("resize",()=>{if(AR.on&&AR.engine==="8w"&&!AR._rs)AR.fit8();});}
   $("arView").hidden=false;$("arView").textContent=AR.view8==="llena"?"Vista: llena":"Vista: completa";
   cv8.hidden=false;ui.style.zIndex=30;ui.hidden=false;AR.on=true;resetAlign();
@@ -646,7 +649,8 @@ async function start8w(){
         const hits=XR8.XrController.hitTest(.5,.5,["ESTIMATED_SURFACE","DETECTED_SURFACE","FEATURE_POINT"])||[];
         const h=hits.find(x=>x.type!=="FEATURE_POINT")||hits[0];tick(h?new THREE.Vector3(h.position.x,h.position.y,h.position.z):null,AR.e8cam);},
       onCameraStatusChange:(ev)=>{if(ev.status==="failed")toast("No se pudo abrir la cámara. Revisá los permisos de Safari para este sitio.",6000);
-        if(ev.status==="hasVideo"){const v=ev.video||document.querySelector("video");const set=()=>{if(v&&v.videoWidth){AR.camAspect=v.videoWidth/v.videoHeight;AR.fit8&&AR.fit8();}};set();v&&v.addEventListener("loadedmetadata",set,{once:true});}},
+        if(ev.status==="hasVideo"){const v=ev.video||document.querySelector("video");const set=()=>{if(v&&v.videoWidth){AR.camAspect=v.videoWidth/v.videoHeight;AR.fit8&&AR.fit8();}};set();if(v){v.addEventListener("loadedmetadata",set,{once:true});v.addEventListener("resize",set);}
+          [400,1200,2500].forEach(t=>setTimeout(()=>{set();AR.renudge8&&AR.renudge8();},t));}},
       onException:e=>{const msg=e&&e.type==="permission"?`Falta el permiso de ${e.permission==="camera"?"cámara":"movimiento y orientación"}. Cerrá la pestaña, abrí de nuevo la página y tocá Permitir.`:"Error del motor de RA: "+(e&&(e.message||e.type)||e);toast(msg,8000);stop8w();}
     }]);AR.e8ready=true;}
   else{if(AR.e8scene){while(AR.e8scene.children.length)AR.e8scene.remove(AR.e8scene.children[0]);addHelpers(AR.e8scene);}setStage("A");}
