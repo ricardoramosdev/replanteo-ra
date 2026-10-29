@@ -157,7 +157,7 @@ select{background:var(--ink);border:1px solid var(--line);border-radius:8px;padd
 
 <!-- Capa superpuesta durante la sesión de RA -->
 <div id="arUI" hidden>
-  <div class="top"><span class="pill" id="arTrack">Buscando el piso…</span><span class="pill" id="arScale" hidden></span><button class="pill" id="arView" hidden style="margin-left:auto;pointer-events:auto">Vista: completa</button></div>
+  <div class="top"><span class="pill" id="arTrack">Buscando el piso…</span><button class="pill" id="arScale" hidden style="pointer-events:auto"></button><button class="pill" id="arView" hidden style="margin-left:auto;pointer-events:auto">Vista: completa</button></div>
   <div class="cross" aria-hidden="true"></div>
   <div class="steps" id="arSteps"></div>
   <div class="guide" id="arGuide" hidden>
@@ -548,11 +548,16 @@ function addHelpers(scene){
 function placeTarget(){const tg=AR.root&&AR.root.getObjectByName("target");if(!tg)return;tg.visible=S.T>=0;if(S.T>=0){const p=S.P.points[S.T];tg.position.copy(L3(p.x,p.y));}}
 AR.retarget=()=>{placeTarget();$("gName").textContent=S.T>=0?S.P.points[S.T].label:"Sin objetivo";};
 
-function solve(){ // ajusta el plano a los dos puntos marcados (rotación + traslación, sin escala)
+function solve(){ // ajusta el plano a los dos puntos marcados: rotación + traslación y, si está activado, escala horizontal
   const ax=AR.Aw.x,az=AR.Aw.z,bx=AR.Bw.x,bz=AR.Bw.z;
   const thW=Math.atan2(-(bz-az),bx-ax),thD=Math.atan2(S.B.y-S.A.y,S.B.x-S.A.x);AR.theta=thW-thD;AR.floorY=(AR.Aw.y+AR.Bw.y)/2;
-  const m=new THREE.Matrix4().makeRotationY(AR.theta);m.setPosition(ax,AR.floorY,az);AR.root.matrix.copy(m);AR.root.matrixWorldNeedsUpdate=true;
-  const dW=Math.hypot(bx-ax,bz-az),dD=Math.hypot(S.B.x-S.A.x,S.B.y-S.A.y);return{dW,dD,err:(dW-dD)/dD};}
+  const dW=Math.hypot(bx-ax,bz-az),dD=Math.hypot(S.B.x-S.A.x,S.B.y-S.A.y);AR.k=AR.scaleFit?dW/dD:1;
+  const m=new THREE.Matrix4().makeRotationY(AR.theta).multiply(new THREE.Matrix4().makeScale(AR.k,1,AR.k));m.setPosition(ax,AR.floorY,az);AR.root.matrix.copy(m);AR.root.matrixWorldNeedsUpdate=true;
+  return{dW,dD,err:(dW-dD)/dD};}
+AR.scaleFit=true;AR.k=1;
+function scalePill(){const q=solve(),pct=q.err*100,el=$("arScale");el.hidden=false;const sg=(pct>=0?"+":"")+fmt(pct,1)+"%";
+  el.textContent=AR.scaleFit?`Escala ajustada ${sg} · A↔B ${fmt(q.dD,2)} m`:`Escala real · A↔B medido ${fmt(q.dW,2)} m (${sg})`;
+  el.className="pill "+(Math.abs(pct)<1?"ok":"warn");}
 
 function setStage(st){AR.stage=st;const m=$("arMark"),steps=$("arSteps");
   $("arRedo").hidden=st!=="done";$("arImg").hidden=!(st==="done"&&S.P.image);$("arGuide").hidden=st!=="done";steps.hidden=st==="done";m.hidden=st==="done";
@@ -574,7 +579,7 @@ function updateGuide(cam){
   if(S.T<0){$("gDist").innerHTML="—";$("gDir").textContent="Elegí un objetivo con ◀ ▶";AR.guideLine.visible=false;return;}
   const p=S.P.points[S.T],tw=L3(p.x,p.y).applyMatrix4(AR.root.matrix);
   if(!AR.reticle.visible){$("gDir").textContent="Apuntá la mira al piso";AR.guideLine.visible=false;return;}
-  const rp=new THREE.Vector3().setFromMatrixPosition(AR.reticle.matrix),dx=tw.x-rp.x,dz=tw.z-rp.z,dist=Math.hypot(dx,dz);
+  const rp=new THREE.Vector3().setFromMatrixPosition(AR.reticle.matrix),k=AR.k||1,dx=(tw.x-rp.x)/k,dz=(tw.z-rp.z)/k,dist=Math.hypot(dx,dz); // en metros del plano
   cam.updateMatrixWorld();cam.matrixWorld.decompose(_v,_q,_f);const fw=new THREE.Vector3(0,0,-1).applyQuaternion(_q);fw.y=0;
   if(fw.lengthSq()<1e-6)fw.set(0,0,-1);fw.normalize();const rt=new THREE.Vector3(-fw.z,0,fw.x);
   const ahead=dx*fw.x+dz*fw.z,right=dx*rt.x+dz*rt.z;
@@ -666,11 +671,13 @@ $("arMark").onclick=async()=>{
   if(AR.engine==="webxr"){try{if(AR.lastHit&&AR.lastHit.createAnchor)anchor=await AR.lastHit.createAnchor();}catch(e){}}
   if(AR.stage==="A"){AR.Aw=v;AR.anchA=anchor;setStage("B");}
   else if(AR.stage==="B"){if(v.distanceTo(AR.Aw)<0.3){toast("B está demasiado cerca de A");return;}AR.Bw=v;AR.anchB=anchor;
-    const q=solve(),pct=q.err*100;const el=$("arScale");el.hidden=false;el.textContent=`A↔B medido ${fmt(q.dW,2)} m · plano ${fmt(q.dD,2)} m (${pct>=0?"+":""}${fmt(pct,1)}%)`;
-    el.className="pill "+(Math.abs(pct)<1?"ok":"warn");setStage("done");
-    if(Math.abs(pct)>=2)toast("La distancia medida entre A y B no coincide con el plano. Revisá que marcaste los puntos correctos o las unidades del dibujo"+(AR.engine==="8w"?", y mové el celular de lado a lado para que recalcule la escala":"")+".",6500);}
+    AR.scaleFit=true;const pct=solve().err*100;
+    if(Math.abs(pct)>5){AR.scaleFit=false;toast(`A↔B medido difiere ${fmt(pct,1)}% del plano: es demasiado para corregirlo con escala. Revisá que marcaste los puntos correctos o las unidades del dibujo y tocá Realinear.`,8000);}
+    else if(Math.abs(pct)>=2)toast(`Escala corregida ${fmt(pct,1)}%. Es una corrección grande: confirmá con cinta un tercer punto antes de replantear.`,6500);
+    scalePill();setStage("done");}
 };
 $("arRedo").onclick=()=>{resetAlign();setStage("A");};
+$("arScale").onclick=()=>{if(!(AR.Aw&&AR.Bw))return;AR.scaleFit=!AR.scaleFit;scalePill();toast(AR.scaleFit?"El plano se estira o encoge para que A↔B mida lo mismo que en el dibujo.":"El plano se muestra a la escala que mide el celular, sin corrección.",3500);};
 $("arExit").onclick=()=>{if(AR.engine==="webxr")AR.session&&AR.session.end();else stop8w();};
 $("arImg").onclick=()=>{AR.showImg=!AR.showImg;const m=AR.root&&AR.root.getObjectByName("img");if(m)m.visible=AR.showImg;};
 $("gPrev").onclick=()=>stepTarget(-1);$("gNext").onclick=()=>stepTarget(1);
